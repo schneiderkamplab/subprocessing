@@ -1,17 +1,15 @@
 from itertools import zip_longest
-from pickle import dumps, loads
-import subprocess
-import sys
+from dill import dumps, loads
 
-def init_process(module_name):
-    return subprocess.Popen([sys.executable, '-m', 'subprocessing'], shell=False, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+from .worker import Worker
 
-class SubprocessPool:
+class Pool:
 
-    def __init__(self, n_workers, module_name):
-        self.n_workers = n_workers
+    def __init__(self, processes=2, module_name='subprocessing', log_level=1):
+        self.n_workers = processes
         self.module_name = module_name
-        self.workers = [init_process(module_name) for _ in range(n_workers)]
+        self.log_level = log_level
+        self.workers = [Worker(log_level=self.log_level) for _ in range(self.n_workers)]
         self.active_workers = []
         self.next_worker = 0
 
@@ -23,35 +21,17 @@ class SubprocessPool:
 
     def __del__(self):
         for worker in self.workers:
-            worker.stdin.close()
-            worker.stdout.close()
-            worker.terminate()
+            del worker
 
     def map(self, func, argss, kwargss=[]):
         for args, kwargs in zip_longest(argss, kwargss, fillvalue={}):
             if len(self.active_workers) == self.n_workers:
                 worker = self.active_workers.pop(0)
-                header = bytearray()
-                header.extend(worker.stdout.read(8))
-                while header[-8:] != b'\x00\x00\x00\x00\x00\x00\x00\x00':
-                    header.extend(worker.stdout.read(1))
-                length = int.from_bytes(worker.stdout.read(8), byteorder='big')
-                result = worker.stdout.read(length)
-                yield loads(result)
+                yield worker.receive()
             worker = self.workers[self.next_worker]
             self.next_worker = (self.next_worker + 1) % self.n_workers
             self.active_workers.append(worker)
-            pickled = dumps((func, args, kwargs))
-            worker.stdin.write(b'\x00\x00\x00\x00\x00\x00\x00\x00')
-            worker.stdin.write(len(pickled).to_bytes(8, byteorder='big'))
-            worker.stdin.write(pickled)
-            worker.stdin.flush()
+            worker.submit(func, args, kwargs)
         while self.active_workers:
             worker = self.active_workers.pop(0)
-            header = bytearray()
-            header.extend(worker.stdout.read(8))
-            while header[-8:] != b'\x00\x00\x00\x00\x00\x00\x00\x00':
-                header.extend(worker.stdout.read(1))
-            length = int.from_bytes(worker.stdout.read(8), byteorder='big')
-            result = worker.stdout.read(length)
-            yield loads(result)
+            yield worker.receive()
