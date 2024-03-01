@@ -1,29 +1,38 @@
-#from contextlib import redirect_stdout
-from pickle import dumps, loads
-from sys import stderr, stdin, stdout
+from dill import dumps, loads
+import os
+import sys
+
+tempdir = sys.argv[1]
+log_level = bool(sys.argv[2])
+
+def log(message, level=2):
+    if level <= log_level:
+        print(f"MAIN: {message}", file=sys.stderr)
+
+log("starting")
+stdin = open(os.path.join(tempdir, "stdin"), 'rb')
+log("opened stdin")
+stdout = open(os.path.join(tempdir, "stdout"), 'wb')
+log("opened stdout")
 
 while True:
-    #print("WORKER: waiting for input", file=stderr)
-    header = bytearray()
-    header.extend(stdin.buffer.read(8))
-    while header[-8:] != b'\x00\x00\x00\x00\x00\x00\x00\x00':
-        header.extend(stdin.buffer.read(1))
-    #print("WORKER: reading length", file=stderr)
-    length = int.from_bytes(stdin.buffer.read(8), byteorder='big')
-    #print(f"WORKER: got length {length}", file=stderr)
-    inp = stdin.buffer.read(length)
-    #print(f"WORKER: got input of length {len(inp)}", file=stderr)
+    log("waiting for input")
+    length = int.from_bytes(stdin.read(8), byteorder='big')
+    log("got length {length}")
+    if length == 0:
+        log("received termination signal")
+        break
+    inp = stdin.read(length)
+    log(f"got input of length {len(inp)}")
     f, args, kwargs = loads(inp)
-    #print(f"WORKER: parsed input to {f} applied to {args}", file=stderr)
-    #with redirect_stdout(stderr):
+    log(f"parsed input to {f} applied to {args} and {kwargs}", level=1)
     result = f(*args, **kwargs)
-    #print(f"WORKER: result is {result}", file=stderr)
+    log(f"result is {result}", level=1)
     pickled = dumps(result, protocol=4)
-    #print(f"WORKER: pickled result of length {len(pickled)}", file=stderr)
-    stdout.buffer.write(b'\x00\x00\x00\x00\x00\x00\x00\x00')
-    stdout.buffer.write(len(pickled).to_bytes(8, byteorder='big'))
-    #print(f"WORKER: wrote length", file=stderr)
-    stdout.buffer.write(pickled)
-    #print(f"WORKER: wrote pickled result", file=stderr)
-    stdout.buffer.flush()
-    #print(f"WORKER: flushed buffer", file=stderr)
+    log(f"pickled result of length {len(pickled)}")
+    stdout.write(len(pickled).to_bytes(8, byteorder='big'))
+    log("wrote length")
+    stdout.write(pickled)
+    log("wrote pickled result")
+    stdout.flush()
+    log("flushed buffer")
