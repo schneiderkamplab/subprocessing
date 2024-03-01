@@ -1,5 +1,5 @@
 from itertools import zip_longest
-from dill import dumps, loads
+from time import sleep
 
 from .worker import Worker
 
@@ -26,12 +26,22 @@ class Pool:
     def map(self, func, argss, kwargss=[]):
         for args, kwargs in zip_longest(argss, kwargss, fillvalue={}):
             if len(self.active_workers) == self.n_workers:
-                worker = self.active_workers.pop(0)
-                yield worker.receive()
+                while True:
+                    for i in range(len(self.active_workers)):
+                        worker = self.active_workers[i]
+                        try:
+                            yield worker.receive()
+                            break
+                        except EOFError:
+                            continue
+                    else:
+                        sleep(0.1)
+                        continue
+                    break
             worker = self.workers[self.next_worker]
             self.next_worker = (self.next_worker + 1) % self.n_workers
             self.active_workers.append(worker)
             worker.submit(func, args, kwargs)
         while self.active_workers:
             worker = self.active_workers.pop(0)
-            yield worker.receive()
+            yield worker.receive_blocking()
