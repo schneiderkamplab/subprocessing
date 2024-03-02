@@ -23,7 +23,7 @@ class Process:
         self.worker.submit(self.run, [], {})
 
     def join(self):
-        result = self.worker.receive_blocking()
+        result = self.worker.receive()
         del self.worker
         return result
 
